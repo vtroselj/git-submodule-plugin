@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<idea-plugin>
+    <id>com.example.git-submodules</id>
+    <name>Git Submodules Manager</name>
+    <vendor email="support@example.com" url="https://example.com">Example Corp</vendor>
+
+    <description><![CDATA[
+    Git Submodules Management Plugin for IntelliJ IDEA.
+
+    This plugin provides easy-to-use GUI for managing Git submodules in your projects.
+
+    Features:
+    - Add git submodules with a simple dialog
+    - Initialize and update existing submodules
+    - Remove submodules safely
+    - View submodule status in project tree
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>Git4Idea</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <toolWindow id="Git Submodules"
+                    secondary="true"
+                    icon="/icons/submodule.svg"
+                    anchor="bottom"
+                    factoryClass="com.example.gitsubmodules.SubmoduleToolWindowFactory"/>
+    </extensions>
+
+    <actions>
+        <group id="GitSubmodulesGroup" text="Git Submodules" popup="true">
+            <add-to-group group-id="VcsGroups" anchor="after" relative-to-action="Vcs.Operations.Popup"/>
+
+            <action id="AddSubmodule"
+                    class="com.example.gitsubmodules.actions.AddSubmoduleAction"
+                    text="Add Submodule..."
+                    description="Add a new git submodule to the project">
+                <keyboard-shortcut keymap="$default" first-keystroke="ctrl shift alt S"/>
+            </action>
+
+            <action id="UpdateSubmodules"
+                    class="com.example.gitsubmodules.actions.UpdateSubmodulesAction"
+                    text="Update All Submodules"
+                    description="Update all submodules in the project"/>
+
+            <action id="SwitchSubmoduleBranch"
+                    class="com.example.gitsubmodules.actions.SwitchSubmoduleBranchAction"
+                    text="Switch Submodule Branch/Commit..."
+                    description="Switch submodule to a different branch or commit"/>
+
+            <action id="InitSubmodules"
+                    class="com.example.gitsubmodules.actions.InitSubmodulesAction"
+                    text="Initialize Submodules"
+                    description="Initialize all submodules in the project"/>
+        </group>
+    </actions>
+</idea-plugin>
