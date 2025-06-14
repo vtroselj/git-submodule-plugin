@@ -9,16 +9,22 @@ gradle-app.setting
 !gradle-wrapper.jar
 !gradle-wrapper.properties
 
+# IntelliJ Platform Plugin Development
+.intellijPlatform/
+
 # IntelliJ IDEA
 .idea/
-*.iws
 *.iml
 *.ipr
+*.iws
 out/
+
+# Kotlin
+*.class
+
+# Logs
+*.log
 
 # OS
 .DS_Store
 Thumbs.db
-
-# Logs
-*.log
