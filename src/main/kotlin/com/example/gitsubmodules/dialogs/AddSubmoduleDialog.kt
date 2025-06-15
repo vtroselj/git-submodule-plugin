@@ -1,59 +1,60 @@
 package com.example.gitsubmodules.dialogs
 
 import com.example.gitsubmodules.SubmoduleService
+import com.example.gitsubmodules.ui.BaseDialog
+import com.example.gitsubmodules.ui.ValidationMixin
+import com.example.gitsubmodules.utils.AsyncHandler
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.thisLogger
-import com.intellij.openapi.fileChooser.FileChooser
 import com.intellij.openapi.fileChooser.FileChooserDescriptor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.ComboBox
-import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.TextFieldWithBrowseButton
 import com.intellij.openapi.ui.ValidationInfo
-import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.ui.DocumentAdapter
 import com.intellij.ui.components.JBTextField
 import com.intellij.ui.dsl.builder.panel
-import java.awt.event.ActionEvent
-import java.awt.event.ActionListener
-import java.io.File
+import java.awt.event.FocusAdapter
+import java.awt.event.FocusEvent
 import javax.swing.DefaultComboBoxModel
 import javax.swing.JComponent
+import javax.swing.event.DocumentEvent
 
-class AddSubmoduleDialog(private val project: Project) : DialogWrapper(project) {
+class AddSubmoduleDialog(project: Project) : BaseDialog(project), ValidationMixin {
 
     private val urlField = JBTextField()
     private val pathField = TextFieldWithBrowseButton()
     private val branchComboBox = ComboBox<String>()
     private val submoduleService = project.service<SubmoduleService>()
 
+    private var lastLoadedUrl: String? = null
+    private var isLoadingBranches = false
+
     companion object {
         private val LOG = thisLogger()
+        private val DEFAULT_BRANCHES = arrayOf("main", "master", "develop")
     }
 
     init {
         title = "Add Git Submodule"
-        setupBranchLoading()
-        setupPathBrowser()
+        setupComponents()
         init()
     }
 
+    private fun setupComponents() {
+        setupPathBrowser()
+        setupUrlField()
+        setupBranchComboBox()
+    }
+
     private fun setupPathBrowser() {
-        // Create a file chooser descriptor for directories only
-        val descriptor = FileChooserDescriptor(
-            false, // chooseFiles
-            true,  // chooseFolders
-            false, // chooseJars
-            false, // chooseJarsAsFiles
-            false, // chooseJarContents
-            false  // chooseMultiple
-        ).apply {
+        val descriptor = FileChooserDescriptor(false, true, false, false, false, false).apply {
             title = "Select Submodule Directory"
             description = "Choose the directory where the submodule should be created"
             withShowHiddenFiles(false)
             withTreeRootVisible(true)
         }
 
-        // Set up the browse button action
         pathField.addBrowseFolderListener(
             "Select Submodule Directory",
             "Choose the directory where the submodule should be created",
@@ -61,143 +62,134 @@ class AddSubmoduleDialog(private val project: Project) : DialogWrapper(project) 
             descriptor
         )
 
-        // Set the project root as the initial directory
-        val projectPath = project.basePath
-        if (projectPath != null) {
-            pathField.text = projectPath
-        }
+        // Set default to project root
+        project.basePath?.let { pathField.text = it }
     }
 
-    private fun setupBranchLoading() {
-        branchComboBox.isEditable = true
-        branchComboBox.model = DefaultComboBoxModel(arrayOf("master", "main"))
-
-        urlField.addActionListener(object : ActionListener {
-            override fun actionPerformed(e: ActionEvent) {
-                loadBranches()
+    private fun setupUrlField() {
+        // Add document listener for real-time validation
+        urlField.document.addDocumentListener(object : DocumentAdapter() {
+            override fun textChanged(e: DocumentEvent) {
+                // Clear any previous error state
+                setErrorText(null)
             }
         })
 
-        // Also load branches when URL field loses focus
-        urlField.addPropertyChangeListener("focusOwner") {
-            if (!urlField.hasFocus()) {
-                loadBranches()
+        // Load branches when URL field loses focus
+        urlField.addFocusListener(object : FocusAdapter() {
+            override fun focusLost(e: FocusEvent) {
+                val currentUrl = urlField.text.trim()
+                if (currentUrl.isNotBlank() && currentUrl != lastLoadedUrl) {
+                    loadBranches(currentUrl)
+                }
             }
-        }
+        })
     }
 
-    private fun loadBranches() {
-        val url = urlField.text?.trim()
-        if (url.isNullOrBlank()) return
+    private fun setupBranchComboBox() {
+        branchComboBox.isEditable = true
+        branchComboBox.model = DefaultComboBoxModel(DEFAULT_BRANCHES)
+    }
+
+    private fun loadBranches(url: String) {
+        if (isLoadingBranches || url == lastLoadedUrl) return
 
         LOG.info("Loading branches for URL: $url")
-        branchComboBox.model = DefaultComboBoxModel(arrayOf("Loading..."))
-        branchComboBox.isEnabled = false
+        isLoadingBranches = true
+        lastLoadedUrl = url
+
+        AsyncHandler.runOnEDT {
+            branchComboBox.model = DefaultComboBoxModel(arrayOf("Loading..."))
+            branchComboBox.isEnabled = false
+        }
 
         submoduleService.getRemoteBranches(url)
             .thenAccept { branches ->
-                javax.swing.SwingUtilities.invokeLater {
-                    LOG.info("Loaded ${branches.size} branches: $branches")
-                    if (branches.isNotEmpty()) {
-                        val branchArray = branches.toTypedArray()
-                        branchComboBox.model = DefaultComboBoxModel(branchArray)
-                        // Set default to main or master if available
-                        when {
-                            branches.contains("main") -> branchComboBox.selectedItem = "main"
-                            branches.contains("master") -> branchComboBox.selectedItem = "master"
-                            else -> branchComboBox.selectedIndex = 0
-                        }
-                    } else {
-                        branchComboBox.model = DefaultComboBoxModel(arrayOf("main", "master"))
-                        branchComboBox.selectedItem = "main"
-                    }
-                    branchComboBox.isEnabled = true
+                AsyncHandler.runOnEDT {
+                    updateBranchComboBox(branches)
+                    isLoadingBranches = false
                 }
             }
             .exceptionally { throwable ->
                 LOG.warn("Failed to load branches", throwable)
-                javax.swing.SwingUtilities.invokeLater {
-                    branchComboBox.model = DefaultComboBoxModel(arrayOf("main", "master"))
+                AsyncHandler.runOnEDT {
+                    branchComboBox.model = DefaultComboBoxModel(DEFAULT_BRANCHES)
                     branchComboBox.selectedItem = "main"
                     branchComboBox.isEnabled = true
+                    isLoadingBranches = false
                 }
                 null
             }
+    }
+
+    private fun updateBranchComboBox(branches: List<String>) {
+        if (branches.isEmpty()) {
+            branchComboBox.model = DefaultComboBoxModel(DEFAULT_BRANCHES)
+            branchComboBox.selectedItem = "main"
+        } else {
+            val branchArray = branches.toTypedArray()
+            branchComboBox.model = DefaultComboBoxModel(branchArray)
+
+            // Select appropriate default branch
+            when {
+                branches.contains("main") -> branchComboBox.selectedItem = "main"
+                branches.contains("master") -> branchComboBox.selectedItem = "master"
+                branches.contains("develop") -> branchComboBox.selectedItem = "develop"
+                else -> branchComboBox.selectedIndex = 0
+            }
+        }
+        branchComboBox.isEnabled = true
     }
 
     override fun createCenterPanel(): JComponent {
         return panel {
             row("Repository URL:") {
                 cell(urlField)
-                    .comment("Git repository URL (https://github.com/user/repo.git)")
+                    .comment("Git repository URL (e.g., https://github.com/user/repo.git)")
                     .focused()
                     .resizableColumn()
             }
             row("Local path:") {
                 cell(pathField)
-                    .comment("Local directory path for the submodule (click browse to select)")
+                    .comment("Directory where the submodule will be created")
                     .resizableColumn()
             }
             row("Branch/Tag:") {
                 cell(branchComboBox)
-                    .comment("Branch, tag, or commit to track (leave empty for default)")
+                    .comment("Branch, tag, or commit to track (optional)")
                     .resizableColumn()
             }
         }
-    }
-
-    fun getUrl(): String {
-        val url = urlField.text.orEmpty().trim()
-        LOG.info("getUrl() returning: '$url'")
-        return url
-    }
-
-    fun getPath(): String {
-        val path = pathField.text.orEmpty().trim()
-        LOG.info("getPath() returning: '$path'")
-        return path
-    }
-
-    fun getBranch(): String? {
-        val selected = branchComboBox.selectedItem as? String
-        val branch = if (selected.isNullOrBlank() || selected == "Loading...") null else selected
-        LOG.info("getBranch() returning: '$branch'")
-        return branch
     }
 
     override fun doValidate(): ValidationInfo? {
         val url = getUrl()
         val path = getPath()
 
-        LOG.info("doValidate() called - URL: '$url', Path: '$path'")
+        LOG.debug("Validating - URL: '$url', Path: '$path'")
 
-        if (url.isEmpty()) {
-            LOG.info("Validation failed: URL is empty")
-            return ValidationInfo("Repository URL is required", urlField)
-        }
-        if (path.isEmpty()) {
-            LOG.info("Validation failed: Path is empty")
-            return ValidationInfo("Local path is required", pathField)
-        }
+        // Use validation mixin methods
+        validateUrl(url, urlField)?.let { return it }
+        validatePath(path, pathField.textField)?.let { return it }
 
-        // Additional validation to check if the path is valid
-        try {
-            val file = File(path)
-            if (file.exists() && !file.isDirectory) {
-                LOG.info("Validation failed: Path exists but is not a directory")
-                return ValidationInfo("Path must be a directory", pathField)
-            }
-        } catch (e: Exception) {
-            LOG.info("Validation failed: Invalid path format", e)
-            return ValidationInfo("Invalid path format", pathField)
-        }
-
-        LOG.info("Validation passed")
         return null
     }
 
-    override fun doOKAction() {
-        LOG.info("doOKAction() called")
-        super.doOKAction()
+    override fun onOKAction(): Boolean {
+        // Dialog validation passed, action will be handled by the caller
+        return true
+    }
+
+    fun getUrl(): String = urlField.text.trim()
+
+    fun getPath(): String = pathField.text.trim()
+
+    fun getBranch(): String? {
+        val selected = branchComboBox.selectedItem as? String
+        return when {
+            selected.isNullOrBlank() -> null
+            selected == "Loading..." -> null
+            else -> selected
+        }
     }
 }

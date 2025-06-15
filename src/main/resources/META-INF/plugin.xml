@@ -12,8 +12,9 @@
     Features:
     - Add git submodules with a simple dialog
     - Initialize and update existing submodules
-    - Remove submodules safely
-    - View submodule status in project tree
+    - Switch submodule branches/commits
+    - View submodule status in tool window
+    - Automatic VCS integration
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>
@@ -25,6 +26,10 @@
                     icon="/icons/submodule.svg"
                     anchor="bottom"
                     factoryClass="com.example.gitsubmodules.SubmoduleToolWindowFactory"/>
+
+        <notificationGroup id="Git Submodules"
+                           displayType="BALLOON"
+                           key="notification.group.git.submodules"/>
     </extensions>
 
     <actions>
