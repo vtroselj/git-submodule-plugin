@@ -17,6 +17,10 @@ repositories {
 dependencies {
     implementation("org.jetbrains.kotlin:kotlin-stdlib:1.9.22")
 
+    // Coroutines support
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.7.3")
+
     intellijPlatform {
         intellijIdeaCommunity("2023.3.2")
         bundledPlugin("Git4Idea")
@@ -26,6 +30,7 @@ dependencies {
         instrumentationTools()
     }
 
+    // Testing dependencies
     testImplementation(kotlin("test"))
 }
 
@@ -36,7 +41,17 @@ intellijPlatform {
     pluginConfiguration {
         name = "Git Submodule Plugin"
         description = "Git Submodules Management Plugin for IntelliJ IDEA."
-        changeNotes = "Initial release"
+        changeNotes = """
+            <h3>Version 1.2</h3>
+            <ul>
+                <li>Add/Remove Git submodules</li>
+                <li>Initialize and update submodules</li>
+                <li>Switch submodule branches</li>
+                <li>Batch operations support</li>
+                <li>Performance caching</li>
+                <li>Enhanced tool window with multi-select</li>
+            </ul>
+        """.trimIndent()
 
         ideaVersion {
             sinceBuild = "233"
@@ -59,6 +74,7 @@ tasks {
     compileKotlin {
         kotlinOptions {
             jvmTarget = "17"
+            freeCompilerArgs = listOf("-Xjsr305=strict")
         }
     }
 

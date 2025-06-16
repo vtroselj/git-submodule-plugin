@@ -1,18 +1,17 @@
 package com.example.gitsubmodules
 
+import com.example.gitsubmodules.cache.SubmoduleCacheService
 import com.example.gitsubmodules.git.GitCommandExecutor
-import com.example.gitsubmodules.git.GitCommandException
 import com.example.gitsubmodules.model.SubmoduleResult
 import com.example.gitsubmodules.utils.AsyncHandler
 import com.intellij.openapi.components.Service
+import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.Logger
-import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFileManager
 import git4idea.repo.GitRepository
 import git4idea.repo.GitRepositoryManager
 import java.io.File
-import java.nio.file.Path
 import java.nio.file.Paths
 import java.util.concurrent.CompletableFuture
 
@@ -22,6 +21,8 @@ class SubmoduleService(private val project: Project) {
     companion object {
         private val LOG = Logger.getInstance(SubmoduleService::class.java)
     }
+
+    private val cacheService = project.service<SubmoduleCacheService>()
 
     data class SubmoduleInfo(
         val name: String,
@@ -83,6 +84,8 @@ class SubmoduleService(private val project: Project) {
                     AsyncHandler.runOnEDT {
                         VirtualFileManager.getInstance().asyncRefresh(null)
                     }
+                    // Invalidate cache after adding submodule
+                    cacheService.invalidateSubmoduleCache()
                     SubmoduleResult.Success
                 } else {
                     SubmoduleResult.Error(parseGitError(result.error))
@@ -98,18 +101,29 @@ class SubmoduleService(private val project: Project) {
      * Get remote branches for a repository URL
      */
     fun getRemoteBranches(url: String): CompletableFuture<List<String>> {
+        // Check cache first
+        val cached = cacheService.getCachedBranches(url)
+        if (cached != null) {
+            LOG.debug("Using cached branches for: $url")
+            return CompletableFuture.completedFuture(cached)
+        }
+
         return CompletableFuture.supplyAsync {
             try {
                 // Use a temporary directory for ls-remote
                 val executor = GitCommandExecutor(System.getProperty("user.dir"))
                 val lines = executor.executeAndParseLines("ls-remote", "--heads", url)
 
-                lines.mapNotNull { line ->
+                val branches = lines.mapNotNull { line ->
                     val parts = line.split("\t")
                     if (parts.size >= 2) {
                         parts[1].removePrefix("refs/heads/")
                     } else null
                 }
+
+                // Cache the results
+                cacheService.cacheBranches(url, branches)
+                branches
             } catch (e: Exception) {
                 LOG.warn("Failed to fetch remote branches", e)
                 emptyList()
@@ -186,6 +200,8 @@ class SubmoduleService(private val project: Project) {
                     AsyncHandler.runOnEDT {
                         VirtualFileManager.getInstance().asyncRefresh(null)
                     }
+                    // Invalidate cache after update
+                    cacheService.invalidateSubmoduleCache()
                 }
 
                 result.isSuccess
@@ -233,6 +249,8 @@ class SubmoduleService(private val project: Project) {
                     AsyncHandler.runOnEDT {
                         VirtualFileManager.getInstance().asyncRefresh(null)
                     }
+                    // Invalidate cache after init
+                    cacheService.invalidateSubmoduleCache()
                 }
 
                 updateResult.isSuccess
@@ -249,14 +267,101 @@ class SubmoduleService(private val project: Project) {
     fun getSubmodules(): List<SubmoduleInfo> {
         val repository = getMainRepository() ?: return emptyList()
 
+        // Check cache first
+        val cached = cacheService.getCachedSubmodules(repository.root.path)
+        if (cached != null) {
+            LOG.debug("Using cached submodules for: ${repository.root.path}")
+            return cached
+        }
+
         return try {
             val gitmodulesFile = File(repository.root.path, ".gitmodules")
             if (!gitmodulesFile.exists()) return emptyList()
 
-            parseGitmodulesFile(gitmodulesFile, repository)
+            val submodules = parseGitmodulesFile(gitmodulesFile, repository)
+
+            // Cache the results
+            cacheService.cacheSubmodules(repository.root.path, submodules)
+            submodules
         } catch (e: Exception) {
             LOG.error("Error reading submodules", e)
             emptyList()
+        }
+    }
+
+    /**
+     * Remove a submodule safely
+     */
+    fun removeSubmodule(path: String): CompletableFuture<SubmoduleResult> {
+        return AsyncHandler.runInBackground(
+            project,
+            "Removing Submodule: $path",
+            canBeCancelled = true
+        ) { indicator ->
+            indicator.text = "Validating submodule..."
+
+            val repository = getMainRepository() ?: return@runInBackground SubmoduleResult.Error(
+                "No Git repository found"
+            )
+
+            // Check if submodule exists
+            val submodules = getSubmodules()
+            val submoduleExists = submodules.any { it.path == path }
+
+            if (!submoduleExists) {
+                return@runInBackground SubmoduleResult.Error("Submodule not found: $path")
+            }
+
+            try {
+                val executor = GitCommandExecutor(repository.root.path)
+
+                indicator.text = "Deinitializing submodule..."
+                // Deinitialize (ignore errors as it might already be deinitialized)
+                executor.executeSync("submodule", "deinit", "-f", path, timeout = 10)
+
+                indicator.text = "Removing from Git index..."
+                // Remove from index (ignore errors as it might not be in index)
+                executor.executeSync("rm", "--cached", path, timeout = 10)
+
+                indicator.text = "Updating .gitmodules..."
+                // Remove from .gitmodules
+                val configResult = executor.executeSync(
+                    "config", "--file", ".gitmodules",
+                    "--remove-section", "submodule.$path",
+                    timeout = 10
+                )
+
+                if (configResult.isSuccess) {
+                    // Stage .gitmodules changes
+                    executor.executeSync("add", ".gitmodules")
+                }
+
+                indicator.text = "Cleaning up directories..."
+                // Remove physical directory
+                val submoduleDir = File(repository.root.path, path)
+                if (submoduleDir.exists()) {
+                    submoduleDir.deleteRecursively()
+                }
+
+                // Clean .git/modules
+                val gitModulesDir = File(repository.root.path, ".git/modules/$path")
+                if (gitModulesDir.exists()) {
+                    gitModulesDir.deleteRecursively()
+                }
+
+                // Refresh and invalidate cache
+                AsyncHandler.runOnEDT {
+                    VirtualFileManager.getInstance().asyncRefresh(null)
+                }
+                cacheService.invalidateSubmoduleCache()
+
+                LOG.info("Successfully removed submodule: $path")
+                SubmoduleResult.Success
+
+            } catch (e: Exception) {
+                LOG.error("Failed to remove submodule: $path", e)
+                SubmoduleResult.Error("Failed to remove submodule: ${e.message}")
+            }
         }
     }
 

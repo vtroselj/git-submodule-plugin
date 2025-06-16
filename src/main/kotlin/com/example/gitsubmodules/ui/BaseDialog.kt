@@ -86,7 +86,7 @@ interface ValidationMixin {
         }
 
         // Check for invalid characters
-        val invalidChars = listOf('<', '>', ':', '"', '|', '?', '*')
+        val invalidChars = listOf('<', '>', '"', '|', '?', '*')
         val hasInvalidChars = invalidChars.any { path.contains(it) }
 
         return if (hasInvalidChars) {

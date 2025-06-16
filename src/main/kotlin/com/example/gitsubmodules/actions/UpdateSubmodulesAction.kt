@@ -14,7 +14,7 @@ class UpdateSubmodulesAction : AnAction(), DumbAware {
         val submoduleService = project.service<SubmoduleService>()
 
         submoduleService.updateSubmodules()
-            .thenAccept { success ->
+            .thenAccept { _ ->
                 // Handle result
             }
     }

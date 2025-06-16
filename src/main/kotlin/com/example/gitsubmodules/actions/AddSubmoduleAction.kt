@@ -205,7 +205,11 @@ class AddSubmoduleAction : AnAction() {
             try {
                 val virtualFile = LocalFileSystem.getInstance().refreshAndFindFileByPath(submodulePath)
                 virtualFile?.refresh(false, true)
-                project.baseDir?.refresh(false, true)
+
+                // Refresh project files
+                project.basePath?.let { basePath ->
+                    LocalFileSystem.getInstance().refreshAndFindFileByPath(basePath)?.refresh(false, true)
+                }
                 LOG.info("Project files refreshed")
             } catch (e: Exception) {
                 LOG.error("Error refreshing project files", e)
