@@ -2,12 +2,16 @@ package com.example.gitsubmodules
 
 import com.example.gitsubmodules.batch.BatchOperationManager
 import com.example.gitsubmodules.cache.SubmoduleCacheService
+import com.example.gitsubmodules.events.SubmoduleChangeListener
+import com.example.gitsubmodules.events.SubmoduleTopics
 import com.intellij.icons.AllIcons
+import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.*
 import com.intellij.openapi.components.service
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.SimpleToolWindowPanel
+import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowFactory
 import com.intellij.ui.ScrollPaneFactory
@@ -28,7 +32,7 @@ class SubmoduleToolWindowFactory : ToolWindowFactory {
     }
 }
 
-class SubmoduleToolWindowPanel(private val project: Project) : SimpleToolWindowPanel(true, true) {
+class SubmoduleToolWindowPanel(private val project: Project) : SimpleToolWindowPanel(true, true), Disposable {
 
     private val submoduleService = project.service<SubmoduleService>()
     private val batchManager = project.service<BatchOperationManager>()
@@ -40,6 +44,16 @@ class SubmoduleToolWindowPanel(private val project: Project) : SimpleToolWindowP
     init {
         setupUI()
         refreshSubmodules()
+
+        // Subscribe to submodule changes
+        val connection = project.messageBus.connect(this)
+        connection.subscribe(SubmoduleTopics.SUBMODULE_CHANGE_TOPIC, object : SubmoduleChangeListener {
+            override fun submodulesChanged() {
+                refreshSubmodules()
+            }
+        })
+
+        Disposer.register(project, this)
     }
 
     private fun setupUI() {
@@ -355,5 +369,9 @@ class SubmoduleToolWindowPanel(private val project: Project) : SimpleToolWindowP
                 JOptionPane.INFORMATION_MESSAGE
             )
         }
+    }
+
+    override fun dispose() {
+        // Cleanup handled by message bus connection
     }
 }

@@ -1,6 +1,7 @@
 package com.example.gitsubmodules.batch
 
 import com.example.gitsubmodules.SubmoduleService
+import com.example.gitsubmodules.events.SubmoduleTopics
 import com.example.gitsubmodules.git.GitCommandExecutor
 import com.example.gitsubmodules.notifications.NotificationService
 import com.example.gitsubmodules.utils.AsyncHandler
@@ -362,6 +363,9 @@ class BatchOperationManager(private val project: Project) {
             // Invalidate cache after batch removal
             project.service<com.example.gitsubmodules.cache.SubmoduleCacheService>()
                 .invalidateSubmoduleCache()
+
+            // Notify about changes
+            project.messageBus.syncPublisher(SubmoduleTopics.SUBMODULE_CHANGE_TOPIC).submodulesChanged()
 
             showResultNotification(result, "Remove")
         }

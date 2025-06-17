@@ -1,6 +1,7 @@
 package com.example.gitsubmodules
 
 import com.example.gitsubmodules.cache.SubmoduleCacheService
+import com.example.gitsubmodules.events.SubmoduleTopics
 import com.example.gitsubmodules.git.GitCommandExecutor
 import com.example.gitsubmodules.git.GitCommandException
 import com.example.gitsubmodules.model.SubmoduleResult
@@ -89,6 +90,10 @@ class SubmoduleService(private val project: Project) {
                     }
                     // Invalidate cache after adding submodule
                     cacheService.invalidateSubmoduleCache()
+
+                    // Notify listeners about change
+                    project.messageBus.syncPublisher(SubmoduleTopics.SUBMODULE_CHANGE_TOPIC).submodulesChanged()
+
                     SubmoduleResult.Success
                 } else {
                     SubmoduleResult.Error(parseGitError(result.error))
@@ -239,6 +244,9 @@ class SubmoduleService(private val project: Project) {
                 if (allSuccess) {
                     AsyncHandler.runOnEDT {
                         VirtualFileManager.getInstance().asyncRefresh(null)
+
+                        // Notify listeners about change
+                        project.messageBus.syncPublisher(SubmoduleTopics.SUBMODULE_CHANGE_TOPIC).submodulesChanged()
                     }
                     // Invalidate cache after update
                     cacheService.invalidateSubmoduleCache()
@@ -329,6 +337,9 @@ class SubmoduleService(private val project: Project) {
                 if (allSuccess) {
                     AsyncHandler.runOnEDT {
                         VirtualFileManager.getInstance().asyncRefresh(null)
+
+                        // Notify listeners about change
+                        project.messageBus.syncPublisher(SubmoduleTopics.SUBMODULE_CHANGE_TOPIC).submodulesChanged()
                     }
                     // Invalidate cache after init
                     cacheService.invalidateSubmoduleCache()
@@ -436,6 +447,9 @@ class SubmoduleService(private val project: Project) {
                 // Refresh and invalidate cache
                 AsyncHandler.runOnEDT {
                     VirtualFileManager.getInstance().asyncRefresh(null)
+
+                    // Notify listeners about change
+                    project.messageBus.syncPublisher(SubmoduleTopics.SUBMODULE_CHANGE_TOPIC).submodulesChanged()
                 }
                 cacheService.invalidateSubmoduleCache()
 

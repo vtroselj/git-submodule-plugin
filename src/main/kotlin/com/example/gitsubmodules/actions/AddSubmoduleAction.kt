@@ -8,6 +8,7 @@ import com.example.gitsubmodules.utils.AsyncHandler
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.project.Project
@@ -192,8 +193,14 @@ class AddSubmoduleAction : AnAction() {
                     val newMapping = VcsDirectoryMapping(absolutePath, "Git")
                     currentMappings.add(newMapping)
 
-                    // Update the mappings - this will trigger save to vcs.xml
+                    // Update the mappings
                     vcsManager.setDirectoryMappings(currentMappings)
+
+                    // Force immediate save
+                    ApplicationManager.getApplication().invokeLater {
+                        ApplicationManager.getApplication().saveSettings()
+                        project.save()
+                    }
 
                     LOG.info("Added VCS mapping for: $absolutePath")
                 }
