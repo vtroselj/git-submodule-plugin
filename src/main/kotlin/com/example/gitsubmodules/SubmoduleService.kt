@@ -2,16 +2,19 @@ package com.example.gitsubmodules
 
 import com.example.gitsubmodules.cache.SubmoduleCacheService
 import com.example.gitsubmodules.git.GitCommandExecutor
+import com.example.gitsubmodules.git.GitCommandException
 import com.example.gitsubmodules.model.SubmoduleResult
 import com.example.gitsubmodules.utils.AsyncHandler
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFileManager
 import git4idea.repo.GitRepository
 import git4idea.repo.GitRepositoryManager
 import java.io.File
+import java.nio.file.Path
 import java.nio.file.Paths
 import java.util.concurrent.CompletableFuture
 
@@ -349,6 +352,9 @@ class SubmoduleService(private val project: Project) {
                     gitModulesDir.deleteRecursively()
                 }
 
+                // Remove VCS mapping
+                removeVcsMapping(path)
+
                 // Refresh and invalidate cache
                 AsyncHandler.runOnEDT {
                     VirtualFileManager.getInstance().asyncRefresh(null)
@@ -470,6 +476,46 @@ class SubmoduleService(private val project: Project) {
         }
 
         return PathValidationResult(normalizedPath = normalizedPath)
+    }
+
+    private fun removeVcsMapping(submodulePath: String) {
+        try {
+            val repository = getMainRepository() ?: return
+
+            // Try both relative and absolute paths
+            val relativePath = submodulePath
+            val absolutePath = File(repository.root.path, submodulePath).absolutePath
+
+            AsyncHandler.runWriteAction {
+                val vcsManager = com.intellij.openapi.vcs.impl.ProjectLevelVcsManagerImpl.getInstance(project)
+                val currentMappings = vcsManager.directoryMappings.toMutableList()
+
+                // Remove mapping - check for both absolute and relative paths
+                val removed = currentMappings.removeIf { mapping ->
+                    mapping.directory == absolutePath ||
+                            mapping.directory == relativePath ||
+                            mapping.directory.endsWith("/$relativePath") ||
+                            mapping.directory.endsWith("\\$relativePath")
+                }
+
+                if (removed) {
+                    // Use setDirectoryMappings
+                    vcsManager.setDirectoryMappings(currentMappings)
+
+                    // Force immediate save for removal operations
+                    com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater {
+                        com.intellij.openapi.application.ApplicationManager.getApplication().saveSettings()
+                        project.save()
+                    }
+
+                    LOG.info("Removed VCS mapping for: $absolutePath")
+                } else {
+                    LOG.warn("No VCS mapping found to remove for: $absolutePath")
+                }
+            }
+        } catch (e: Exception) {
+            LOG.error("Error removing VCS mapping", e)
+        }
     }
 
     private fun parseGitError(errorOutput: String): String {

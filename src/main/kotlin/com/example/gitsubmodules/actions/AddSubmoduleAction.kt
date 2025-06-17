@@ -191,7 +191,10 @@ class AddSubmoduleAction : AnAction() {
                 if (!exists && File(absolutePath).exists()) {
                     val newMapping = VcsDirectoryMapping(absolutePath, "Git")
                     currentMappings.add(newMapping)
-                    vcsManager.directoryMappings = currentMappings
+
+                    // Update the mappings - this will trigger save to vcs.xml
+                    vcsManager.setDirectoryMappings(currentMappings)
+
                     LOG.info("Added VCS mapping for: $absolutePath")
                 }
             } catch (e: Exception) {

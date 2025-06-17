@@ -321,6 +321,9 @@ class BatchOperationManager(private val project: Project) {
                         }
                     }
 
+                    // Step 7: Remove VCS mapping
+                    removeVcsMapping(path)
+
                     successful.add(path)
                     LOG.info("Successfully removed submodule: $path")
 
@@ -360,6 +363,44 @@ class BatchOperationManager(private val project: Project) {
             NotificationService.notifySuccess(project, message, "Batch Operation Completed")
         } else {
             NotificationService.notifyWarning(project, message, "Batch Operation Completed with Errors")
+        }
+    }
+
+    private fun removeVcsMapping(submodulePath: String) {
+        try {
+            // Try both relative and absolute paths
+            val relativePath = submodulePath
+            val absolutePath = File(project.basePath ?: return, submodulePath).absolutePath
+
+            AsyncHandler.runWriteAction {
+                val vcsManager = com.intellij.openapi.vcs.impl.ProjectLevelVcsManagerImpl.getInstance(project)
+                val currentMappings = vcsManager.directoryMappings.toMutableList()
+
+                // Remove mapping - check for both absolute and relative paths
+                val removed = currentMappings.removeIf { mapping ->
+                    mapping.directory == absolutePath ||
+                            mapping.directory == relativePath ||
+                            mapping.directory.endsWith("/$relativePath") ||
+                            mapping.directory.endsWith("\\$relativePath")
+                }
+
+                if (removed) {
+                    // Use setDirectoryMappings
+                    vcsManager.setDirectoryMappings(currentMappings)
+
+                    // Force immediate save for removal operations
+                    com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater {
+                        com.intellij.openapi.application.ApplicationManager.getApplication().saveSettings()
+                        project.save()
+                    }
+
+                    LOG.info("Removed VCS mapping for: $absolutePath")
+                } else {
+                    LOG.warn("No VCS mapping found to remove for: $absolutePath")
+                }
+            }
+        } catch (e: Exception) {
+            LOG.error("Error removing VCS mapping", e)
         }
     }
 }
