@@ -191,15 +191,52 @@ class SubmoduleService(private val project: Project) {
             val repository = getMainRepository() ?: return@runInBackground false
 
             try {
-                indicator.text = "Updating submodules..."
+                indicator.text = "Reading submodule configurations..."
+                val submodules = getSubmodules()
                 val executor = GitCommandExecutor(repository.root.path)
-                val result = executor.executeSync(
-                    "submodule", "update", "--remote", "--recursive",
-                    indicator = indicator,
-                    timeout = 60 // Longer timeout for updates
-                )
+                var allSuccess = true
 
-                if (result.isSuccess) {
+                // Update each submodule based on its branch configuration
+                submodules.forEachIndexed { index, submodule ->
+                    indicator.text = "Updating ${submodule.name}..."
+                    indicator.fraction = index.toDouble() / submodules.size
+
+                    val result = if (submodule.branch != null) {
+                        // Update with --remote to get latest from the tracked branch
+                        executor.executeSync(
+                            "submodule", "update", "--remote", "--recursive", submodule.path,
+                            indicator = indicator,
+                            timeout = 60
+                        )
+                    } else {
+                        // Update to the commit specified in the parent repository
+                        executor.executeSync(
+                            "submodule", "update", "--recursive", submodule.path,
+                            indicator = indicator,
+                            timeout = 60
+                        )
+                    }
+
+                    if (!result.isSuccess) {
+                        LOG.warn("Failed to update submodule ${submodule.path}: ${result.error}")
+                        allSuccess = false
+                    } else if (submodule.branch != null) {
+                        // After updating, ensure we're on the right branch
+                        val submoduleDir = File(repository.root.path, submodule.path)
+                        if (submoduleDir.exists()) {
+                            val submoduleExecutor = GitCommandExecutor(submoduleDir.path)
+                            val checkoutResult = submoduleExecutor.executeSync(
+                                "checkout", submodule.branch,
+                                indicator = indicator
+                            )
+                            if (!checkoutResult.isSuccess) {
+                                LOG.warn("Failed to checkout branch ${submodule.branch} in ${submodule.path}")
+                            }
+                        }
+                    }
+                }
+
+                if (allSuccess) {
                     AsyncHandler.runOnEDT {
                         VirtualFileManager.getInstance().asyncRefresh(null)
                     }
@@ -207,7 +244,7 @@ class SubmoduleService(private val project: Project) {
                     cacheService.invalidateSubmoduleCache()
                 }
 
-                result.isSuccess
+                allSuccess
             } catch (e: Exception) {
                 LOG.error("Failed to update submodules", e)
                 false
@@ -228,10 +265,11 @@ class SubmoduleService(private val project: Project) {
             val repository = getMainRepository() ?: return@runInBackground false
 
             try {
-                indicator.text = "Initializing submodules..."
+                indicator.text = "Reading submodule configurations..."
+                val submodules = getSubmodules()
                 val executor = GitCommandExecutor(repository.root.path)
 
-                // First init
+                // First init all submodules
                 indicator.text2 = "Running git submodule init..."
                 val initResult = executor.executeSync("submodule", "init", indicator = indicator)
 
@@ -240,15 +278,55 @@ class SubmoduleService(private val project: Project) {
                     return@runInBackground false
                 }
 
-                // Then update
-                indicator.text2 = "Running git submodule update..."
-                val updateResult = executor.executeSync(
-                    "submodule", "update", "--recursive",
-                    indicator = indicator,
-                    timeout = 60
-                )
+                // Then update each submodule with branch tracking if specified
+                indicator.text2 = "Updating submodules with branch configuration..."
+                var allSuccess = true
 
-                if (updateResult.isSuccess) {
+                submodules.forEachIndexed { index, submodule ->
+                    indicator.text = "Updating ${submodule.name}..."
+                    indicator.fraction = index.toDouble() / submodules.size
+
+                    if (submodule.branch != null) {
+                        // If branch is specified, update with --remote to track the branch
+                        val updateResult = executor.executeSync(
+                            "submodule", "update", "--remote", "--recursive", submodule.path,
+                            indicator = indicator,
+                            timeout = 60
+                        )
+
+                        if (!updateResult.isSuccess) {
+                            LOG.warn("Failed to update submodule ${submodule.path} to branch ${submodule.branch}: ${updateResult.error}")
+                            allSuccess = false
+                        } else {
+                            // Checkout the branch in the submodule
+                            val submoduleDir = File(repository.root.path, submodule.path)
+                            if (submoduleDir.exists()) {
+                                val submoduleExecutor = GitCommandExecutor(submoduleDir.path)
+                                val checkoutResult = submoduleExecutor.executeSync(
+                                    "checkout", submodule.branch,
+                                    indicator = indicator
+                                )
+                                if (!checkoutResult.isSuccess) {
+                                    LOG.warn("Failed to checkout branch ${submodule.branch} in ${submodule.path}")
+                                }
+                            }
+                        }
+                    } else {
+                        // No branch specified, update normally
+                        val updateResult = executor.executeSync(
+                            "submodule", "update", "--recursive", submodule.path,
+                            indicator = indicator,
+                            timeout = 60
+                        )
+
+                        if (!updateResult.isSuccess) {
+                            LOG.warn("Failed to update submodule ${submodule.path}: ${updateResult.error}")
+                            allSuccess = false
+                        }
+                    }
+                }
+
+                if (allSuccess) {
                     AsyncHandler.runOnEDT {
                         VirtualFileManager.getInstance().asyncRefresh(null)
                     }
@@ -256,7 +334,7 @@ class SubmoduleService(private val project: Project) {
                     cacheService.invalidateSubmoduleCache()
                 }
 
-                updateResult.isSuccess
+                allSuccess
             } catch (e: Exception) {
                 LOG.error("Failed to initialize submodules", e)
                 false

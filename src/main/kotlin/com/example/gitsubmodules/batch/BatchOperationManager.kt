@@ -74,18 +74,40 @@ class BatchOperationManager(private val project: Project) {
 
                 val repoRoot = project.basePath ?: throw IllegalStateException("Project base path is null")
 
+                // Get submodule configurations
+                val submodules = submoduleService.getSubmodules()
+                val submoduleMap = submodules.associateBy { it.path }
+
                 val futures = paths.map { path ->
                     CompletableFuture.supplyAsync {
                         try {
                             indicator.text = "Updating: $path"
 
-                            // Execute git submodule update for specific path
                             val executor = GitCommandExecutor(repoRoot)
-                            val result = executor.executeSync(
-                                "submodule", "update", "--remote", "--recursive", path
-                            )
+                            val submodule = submoduleMap[path]
+
+                            // Update based on branch configuration
+                            val result = if (submodule?.branch != null) {
+                                // Update with --remote to track the branch
+                                executor.executeSync(
+                                    "submodule", "update", "--remote", "--recursive", path
+                                )
+                            } else {
+                                // Update to the recorded commit
+                                executor.executeSync(
+                                    "submodule", "update", "--recursive", path
+                                )
+                            }
 
                             if (result.isSuccess) {
+                                // If branch is specified, checkout the branch
+                                if (submodule?.branch != null) {
+                                    val submoduleDir = File(repoRoot, path)
+                                    if (submoduleDir.exists()) {
+                                        val submoduleExecutor = GitCommandExecutor(submoduleDir.path)
+                                        submoduleExecutor.executeSync("checkout", submodule.branch)
+                                    }
+                                }
                                 successful.add(path)
                                 LOG.info("Successfully updated submodule: $path")
                             } else {
