@@ -3,19 +3,16 @@ package com.example.gitsubmodules
 import com.example.gitsubmodules.cache.SubmoduleCacheService
 import com.example.gitsubmodules.events.SubmoduleTopics
 import com.example.gitsubmodules.git.GitCommandExecutor
-import com.example.gitsubmodules.git.GitCommandException
 import com.example.gitsubmodules.model.SubmoduleResult
 import com.example.gitsubmodules.utils.AsyncHandler
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.Logger
-import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFileManager
 import git4idea.repo.GitRepository
 import git4idea.repo.GitRepositoryManager
 import java.io.File
-import java.nio.file.Path
 import java.nio.file.Paths
 import java.util.concurrent.CompletableFuture
 
@@ -561,10 +558,32 @@ class SubmoduleService(private val project: Project) {
             return PathValidationResult(error = "Submodule already exists at path: $normalizedPath")
         }
 
-        // Check if directory exists and is not empty
+        // Check if directory exists
         val targetDir = File(repoRoot, normalizedPath)
-        if (targetDir.exists() && targetDir.listFiles()?.isNotEmpty() == true) {
-            return PathValidationResult(error = "Directory is not empty: $normalizedPath")
+        if (targetDir.exists()) {
+            if (!targetDir.isDirectory) {
+                return PathValidationResult(error = "Path exists but is not a directory: $normalizedPath")
+            }
+
+            // Allow empty directories (Git will use them for the submodule)
+            val files = targetDir.listFiles()
+            if (files != null && files.isNotEmpty()) {
+                // Check if it's already a git repository
+                val hasGitDir = files.any { it.name == ".git" }
+                if (hasGitDir) {
+                    return PathValidationResult(error = "Directory already contains a Git repository: $normalizedPath")
+                }
+
+                // For non-empty directories, only allow if they contain just .gitkeep or similar
+                val hasSignificantFiles = files.any { file ->
+                    !file.name.startsWith(".") || file.name == ".git"
+                }
+
+                if (hasSignificantFiles) {
+                    return PathValidationResult(error = "Directory is not empty: $normalizedPath")
+                }
+            }
+            // Empty directory is OK - Git will use it
         }
 
         return PathValidationResult(normalizedPath = normalizedPath)
